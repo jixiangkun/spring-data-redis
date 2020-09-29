@@ -21,6 +21,7 @@ import redis.clients.jedis.GeoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.data.geo.Circle;
