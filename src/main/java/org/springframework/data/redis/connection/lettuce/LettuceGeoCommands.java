@@ -26,7 +26,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -37,6 +36,7 @@ import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResults;
 import org.springframework.data.geo.Metric;
 import org.springframework.data.geo.Point;
+import org.springframework.data.redis.connection.NullableResult;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.connection.convert.ListConverter;
 import org.springframework.lang.Nullable;
@@ -166,23 +166,10 @@ class LettuceGeoCommands implements RedisGeoCommands {
 		GeoArgs.Unit geoUnit = LettuceConverters.toGeoArgsUnit(metric);
 		Converter<Double, Distance> distanceConverter = LettuceConverters.distanceConverterForMetric(metric);
 
-		try {
-			if (isPipelined()) {
-				pipeline(connection.newLettuceResult(getAsyncConnection().geodist(key, member1, member2, geoUnit),
-						distanceConverter));
-				return null;
-			}
-			if (isQueueing()) {
-				transaction(connection.newLettuceResult(getAsyncConnection().geodist(key, member1, member2, geoUnit),
-						distanceConverter));
-				return null;
-			}
-
-			Double distance = getConnection().geodist(key, member1, member2, geoUnit);
-			return distance != null ? distanceConverter.convert(distance) : null;
-		} catch (Exception ex) {
-			throw convertLettuceAccessException(ex);
-		}
+		return connection.execute(
+				sync -> sync.geodist(key, member1, member2, geoUnit),
+				async -> async.geodist(key, member1, member2, geoUnit),
+				distanceConverter);
 	}
 
 	/*

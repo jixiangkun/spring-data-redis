@@ -21,7 +21,6 @@ import redis.clients.jedis.GeoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.data.geo.Circle;
@@ -29,6 +28,7 @@ import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResults;
 import org.springframework.data.geo.Metric;
 import org.springframework.data.geo.Point;
+import org.springframework.data.redis.connection.NullableResult;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.connection.convert.ListConverter;
 import org.springframework.util.Assert;
@@ -164,8 +164,8 @@ class JedisGeoCommands implements RedisGeoCommands {
 				return null;
 			}
 
-			Double distance = connection.getJedis().geodist(key, member1, member2);
-			return distance != null ? distanceConverter.convert(distance) : null;
+			return NullableResult.of(connection.getJedis().geodist(key, member1, member2)).map(distanceConverter::convert)
+					.get();
 		} catch (Exception ex) {
 			throw convertJedisAccessException(ex);
 		}
