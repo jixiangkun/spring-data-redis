@@ -937,7 +937,8 @@ public class LettuceConnection extends AbstractRedisConnection {
 		}
 	}
 
-	<S,T> void executeInPipeline(Function<RedisClusterAsyncCommands, RedisFuture<S>> command, Converter<S, T> converter) {
+	<S, T> void executeInPipeline(Function<RedisClusterAsyncCommands, RedisFuture<S>> command,
+			Converter<S, T> converter) {
 
 		try {
 			pipeline(newLettuceResult(command.apply(getAsyncConnection()), converter));
@@ -946,7 +947,7 @@ public class LettuceConnection extends AbstractRedisConnection {
 		}
 	}
 
-	<S,T> void executeInTx(Function<RedisClusterAsyncCommands, RedisFuture<S>> command, Converter<S, T> converter) {
+	<S, T> void executeInTx(Function<RedisClusterAsyncCommands, RedisFuture<S>> command, Converter<S, T> converter) {
 
 		try {
 			transaction(newLettuceResult(command.apply(getAsyncConnection()), converter));
@@ -966,7 +967,7 @@ public class LettuceConnection extends AbstractRedisConnection {
 		}
 	}
 
-	 <T> RedisFuture<T> executeAsync(Function<RedisClusterAsyncCommands, RedisFuture<T>> command) {
+	<T> RedisFuture<T> executeAsync(Function<RedisClusterAsyncCommands, RedisFuture<T>> command) {
 
 		try {
 			return command.apply(getAsyncConnection());
@@ -975,12 +976,26 @@ public class LettuceConnection extends AbstractRedisConnection {
 		}
 	}
 
+	<S, T> T invoke(RedisFuture<S> future, Converter<S, T> converter) {
+
+		if (isPipelined()) {
+			pipeline(newLettuceResult(future, converter));
+			return null;
+		}
+		if (isQueueing()) {
+			transaction(newLettuceResult(future, converter));
+			return null;
+		}
+		return NullableResult.of((S) await(future)).convert(converter).get();
+	}
+
 	<T> T execute(Function<RedisClusterCommands, T> sync, Function<RedisClusterAsyncCommands, RedisFuture<T>> async) {
 		return execute(sync, async, val -> val);
 	}
 
 	// use a future here and only async.
-	<S,T> T execute(Function<RedisClusterCommands, S> sync, Function<RedisClusterAsyncCommands, RedisFuture<S>> async, Converter<S, T> converter) {
+	<S, T> T execute(Function<RedisClusterCommands, S> sync, Function<RedisClusterAsyncCommands, RedisFuture<S>> async,
+			Converter<S, T> converter) {
 
 		if (isPipelined()) {
 			executeInPipeline(async, converter);
@@ -991,7 +1006,7 @@ public class LettuceConnection extends AbstractRedisConnection {
 			return null;
 		}
 
-//		return execute(sync).convert(converter).get();
+		// return execute(sync).convert(converter).get();
 		return NullableResult.of((S) await(executeAsync(async))).convert(converter).get();
 	}
 

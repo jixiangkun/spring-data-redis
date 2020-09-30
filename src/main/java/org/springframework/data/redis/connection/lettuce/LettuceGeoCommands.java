@@ -166,10 +166,12 @@ class LettuceGeoCommands implements RedisGeoCommands {
 		GeoArgs.Unit geoUnit = LettuceConverters.toGeoArgsUnit(metric);
 		Converter<Double, Distance> distanceConverter = LettuceConverters.distanceConverterForMetric(metric);
 
-		return connection.execute(
-				sync -> sync.geodist(key, member1, member2, geoUnit),
-				async -> async.geodist(key, member1, member2, geoUnit),
-				distanceConverter);
+//		return connection.execute(
+//				sync -> sync.geodist(key, member1, member2, geoUnit),
+//				async -> async.geodist(key, member1, member2, geoUnit),
+//				distanceConverter);
+
+		return connection.invoke(connection.getAsyncConnection().geodist(key, member1, member2, geoUnit), distanceConverter);
 	}
 
 	/*
