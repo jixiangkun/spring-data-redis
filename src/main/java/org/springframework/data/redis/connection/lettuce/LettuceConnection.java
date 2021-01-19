@@ -39,15 +39,22 @@ import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandType;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import io.lettuce.core.sentinel.api.StatefulRedisSentinelConnection;
+import kotlin.jvm.functions.Function2;
+import kotlin.jvm.functions.Function3;
+import kotlin.jvm.functions.Function4;
+import kotlin.jvm.functions.Function5;
 
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
@@ -55,6 +62,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.BeanUtils;
 import org.springframework.core.convert.converter.Converter;
@@ -120,18 +128,16 @@ public class LettuceConnection extends AbstractRedisConnection {
 		return newLettuceResult(resultHolder, (val) -> val);
 	}
 
-	@SuppressWarnings("unchecked")
 	<T, R> LettuceResult<T, R> newLettuceResult(Future<T> resultHolder, Converter<T, R> converter) {
 
-		return LettuceResultBuilder.forResponse(resultHolder).mappedWith((Converter) converter)
+		return LettuceResultBuilder.<T, R> forResponse(resultHolder).mappedWith(converter)
 				.convertPipelineAndTxResults(convertPipelineAndTxResults).build();
 	}
 
-	@SuppressWarnings("unchecked")
 	<T, R> LettuceResult<T, R> newLettuceResult(Future<T> resultHolder, Converter<T, R> converter,
 			Supplier<R> defaultValue) {
 
-		return LettuceResultBuilder.forResponse(resultHolder).mappedWith((Converter) converter)
+		return LettuceResultBuilder.<T, R> forResponse(resultHolder).mappedWith(converter)
 				.convertPipelineAndTxResults(convertPipelineAndTxResults).defaultNullTo(defaultValue).build();
 	}
 
@@ -373,14 +379,17 @@ public class LettuceConnection extends AbstractRedisConnection {
 	}
 
 	@Nullable
-	@SuppressWarnings({ "rawtypes", "unchecked" })
-	private Object await(RedisFuture<?> cmd) {
+	private <T> T await(RedisFuture<T> cmd) {
 
 		if (isMulti) {
 			return null;
 		}
 
-		return LettuceFutures.awaitOrCancel(cmd, timeout, TimeUnit.MILLISECONDS);
+		try {
+			return LettuceFutures.awaitOrCancel(cmd, timeout, TimeUnit.MILLISECONDS);
+		} catch (RuntimeException e) {
+			throw convertLettuceAccessException(e);
+		}
 	}
 
 	@Override
@@ -989,25 +998,69 @@ public class LettuceConnection extends AbstractRedisConnection {
 		return NullableResult.of((S) await(future)).convert(converter).get();
 	}
 
-	<T> T execute(Function<RedisClusterCommands, T> sync, Function<RedisClusterAsyncCommands, RedisFuture<T>> async) {
-		return execute(sync, async, val -> val);
+	@Nullable
+	<T1, S> S inConnection(Function2<RedisClusterAsyncCommands<byte[], byte[]>, T1, RedisFuture<S>> callback, T1 t1) {
+		return inConnection(it -> callback.invoke(getAsyncConnection(), t1));
 	}
 
-	// use a future here and only async.
-	<S, T> T execute(Function<RedisClusterCommands, S> sync, Function<RedisClusterAsyncCommands, RedisFuture<S>> async,
+	@Nullable
+	<T1, T2, S> S inConnection(Function3<RedisClusterAsyncCommands<byte[], byte[]>, T1, T2, RedisFuture<S>> callback,
+			T1 t1, T2 t2) {
+		return inConnection(it -> callback.invoke(getAsyncConnection(), t1, t2));
+	}
+
+	@Nullable
+	<T1, T2, T3, S> S inConnection(
+			Function4<RedisClusterAsyncCommands<byte[], byte[]>, T1, T2, T3, RedisFuture<S>> callback, T1 t1, T2 t2, T3 t3) {
+		return inConnection(it -> callback.invoke(getAsyncConnection(), t1, t2, t3));
+	}
+
+	@Nullable
+	<T1, T2, T3, T4, S> S inConnection(
+			Function5<RedisClusterAsyncCommands<byte[], byte[]>, T1, T2, T3, T4, RedisFuture<S>> callback, T1 t1, T2 t2,
+			T3 t3, T4 t4) {
+		return inConnection(it -> callback.invoke(it, t1, t2, t3, t4));
+	}
+
+	@Nullable
+	<S> S inConnection(Function<RedisClusterAsyncCommands<byte[], byte[]>, RedisFuture<S>> callback) {
+		return inConnection(callback, source -> source);
+	}
+
+	@Nullable
+	<S, SC extends Collection<S>, T> List<T> inConnectionList(
+			Function<RedisClusterAsyncCommands<byte[], byte[]>, RedisFuture<SC>> callback, Converter<S, T> converter) {
+		return inConnection(callback, source -> {
+			return source.stream().map(converter::convert).collect(Collectors.toList());
+		});
+	}
+
+	@Nullable
+	<S, SC extends Collection<S>, T> Set<T> inConnectionSet(
+			Function<RedisClusterAsyncCommands<byte[], byte[]>, RedisFuture<SC>> callback, Converter<S, T> converter) {
+		return inConnection(callback, source -> {
+			return source.stream().map(converter::convert).collect(Collectors.toCollection(LinkedHashSet::new));
+		});
+	}
+
+	@Nullable
+	<S, T> T inConnection(Function<RedisClusterAsyncCommands<byte[], byte[]>, RedisFuture<S>> callback,
 			Converter<S, T> converter) {
 
+		RedisFuture<S> future = callback.apply(getAsyncConnection());
+		try {
 		if (isPipelined()) {
-			executeInPipeline(async, converter);
+			pipeline(newLettuceResult(future, converter));
 			return null;
 		}
 		if (isQueueing()) {
-			executeInTx(async, converter);
+			transaction(newLettuceResult(future, converter));
 			return null;
 		}
-
-		// return execute(sync).convert(converter).get();
-		return NullableResult.of((S) await(executeAsync(async))).convert(converter).get();
+	} catch (Exception ex) {
+		throw convertLettuceAccessException(ex);
+	}
+	return NullableResult.of(await(future)).convert(converter).get();
 	}
 
 	void transaction(FutureResult<?> result) {
@@ -1481,7 +1534,7 @@ public class LettuceConnection extends AbstractRedisConnection {
 
 	/**
 	 * State object associated with flushing of the currently ongoing pipeline.
-	 * 
+	 *
 	 * @author Mark Paluch
 	 * @since 2.3
 	 */
@@ -1514,7 +1567,7 @@ public class LettuceConnection extends AbstractRedisConnection {
 
 	/**
 	 * Implementation to flush on each command.
-	 * 
+	 *
 	 * @author Mark Paluch
 	 * @since 2.3
 	 */
@@ -1539,7 +1592,7 @@ public class LettuceConnection extends AbstractRedisConnection {
 
 	/**
 	 * Implementation to flush on closing the pipeline.
-	 * 
+	 *
 	 * @author Mark Paluch
 	 * @since 2.3
 	 */
@@ -1571,7 +1624,7 @@ public class LettuceConnection extends AbstractRedisConnection {
 
 	/**
 	 * Pipeline state for buffered flushing.
-	 * 
+	 *
 	 * @author Mark Paluch
 	 * @since 2.3
 	 */
