@@ -17,6 +17,7 @@ package org.springframework.data.redis.connection.lettuce;
 
 import io.lettuce.core.BitFieldArgs;
 import io.lettuce.core.RedisFuture;
+import io.lettuce.core.api.async.RedisStringAsyncCommands;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.lettuce.core.cluster.api.sync.RedisClusterCommands;
 
@@ -56,19 +57,7 @@ class LettuceStringCommands implements RedisStringCommands {
 
 		Assert.notNull(key, "Key must not be null!");
 
-		try {
-			if (isPipelined()) {
-				pipeline(connection.newLettuceResult(getAsyncConnection().get(key)));
-				return null;
-			}
-			if (isQueueing()) {
-				transaction(connection.newLettuceResult(getAsyncConnection().get(key)));
-				return null;
-			}
-			return getConnection().get(key);
-		} catch (Exception ex) {
-			throw convertLettuceAccessException(ex);
-		}
+		return connection.invoke().just(RedisStringAsyncCommands::get, key);
 	}
 
 	/*
@@ -81,19 +70,7 @@ class LettuceStringCommands implements RedisStringCommands {
 		Assert.notNull(key, "Key must not be null!");
 		Assert.notNull(value, "Value must not be null!");
 
-		try {
-			if (isPipelined()) {
-				pipeline(connection.newLettuceResult(getAsyncConnection().getset(key, value)));
-				return null;
-			}
-			if (isQueueing()) {
-				transaction(connection.newLettuceResult(getAsyncConnection().getset(key, value)));
-				return null;
-			}
-			return getConnection().getset(key, value);
-		} catch (Exception ex) {
-			throw convertLettuceAccessException(ex);
-		}
+		return connection.invoke().just(RedisStringAsyncCommands::getset, key, value);
 	}
 
 	/*
@@ -106,22 +83,8 @@ class LettuceStringCommands implements RedisStringCommands {
 		Assert.notNull(keys, "Keys must not be null!");
 		Assert.noNullElements(keys, "Keys must not contain null elements!");
 
-		try {
-			if (isPipelined()) {
-				pipeline(
-						connection.newLettuceResult(getAsyncConnection().mget(keys), LettuceConverters.keyValueListUnwrapper()));
-				return null;
-			}
-			if (isQueueing()) {
-				transaction(
-						connection.newLettuceResult(getAsyncConnection().mget(keys), LettuceConverters.keyValueListUnwrapper()));
-				return null;
-			}
-
-			return LettuceConverters.<byte[], byte[]> keyValueListUnwrapper().convert(getConnection().mget(keys));
-		} catch (Exception ex) {
-			throw convertLettuceAccessException(ex);
-		}
+		return connection.invoke().fromMany(RedisStringAsyncCommands::mget, keys)
+				.toList(source -> source.getValueOrElse(null));
 	}
 
 	/*
@@ -134,21 +97,8 @@ class LettuceStringCommands implements RedisStringCommands {
 		Assert.notNull(key, "Key must not be null!");
 		Assert.notNull(value, "Value must not be null!");
 
-		try {
-			if (isPipelined()) {
-				pipeline(
-						connection.newLettuceResult(getAsyncConnection().set(key, value), Converters.stringToBooleanConverter()));
-				return null;
-			}
-			if (isQueueing()) {
-				transaction(
-						connection.newLettuceResult(getAsyncConnection().set(key, value), Converters.stringToBooleanConverter()));
-				return null;
-			}
-			return Converters.stringToBoolean(getConnection().set(key, value));
-		} catch (Exception ex) {
-			throw convertLettuceAccessException(ex);
-		}
+		return connection.invoke().from(RedisStringAsyncCommands::set, key, value)
+				.get(Converters.stringToBooleanConverter());
 	}
 
 	/*

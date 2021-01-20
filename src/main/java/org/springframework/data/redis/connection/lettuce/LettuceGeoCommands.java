@@ -17,7 +17,7 @@ package org.springframework.data.redis.connection.lettuce;
 
 import io.lettuce.core.GeoArgs;
 import io.lettuce.core.GeoWithin;
-import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
+import io.lettuce.core.api.async.RedisGeoAsyncCommands;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -60,10 +60,7 @@ class LettuceGeoCommands implements RedisGeoCommands {
 		Assert.notNull(point, "Point must not be null!");
 		Assert.notNull(member, "Member must not be null!");
 
-		// alternative T1…T8 or so, including overloads for converter and List-based returns
-		connection.inConnection(RedisClusterAsyncCommands::geoadd, key, point.getX(), point.getY(), member);
-
-		return connection.inConnection(it -> it.geoadd(key, point.getX(), point.getY(), member));
+		return connection.invoke().just(RedisGeoAsyncCommands::geoadd, key, point.getX(), point.getY(), member);
 	}
 
 	/*
@@ -110,7 +107,7 @@ class LettuceGeoCommands implements RedisGeoCommands {
 
 	@Nullable
 	private Long geoAdd(byte[] key, Collection<Object> values) {
-		return connection.inConnection(it -> it.geoadd(key, values.toArray()));
+		return connection.invoke().just(it -> it.geoadd(key, values.toArray()));
 	}
 
 	/*
@@ -137,7 +134,8 @@ class LettuceGeoCommands implements RedisGeoCommands {
 		GeoArgs.Unit geoUnit = LettuceConverters.toGeoArgsUnit(metric);
 		Converter<Double, Distance> distanceConverter = LettuceConverters.distanceConverterForMetric(metric);
 
-		return connection.inConnection(it -> it.geodist(key, member1, member2, geoUnit), distanceConverter);
+		return connection.invoke().from(RedisGeoAsyncCommands::geodist, key, member1, member2, geoUnit)
+				.get(distanceConverter);
 	}
 
 	/*
@@ -151,7 +149,8 @@ class LettuceGeoCommands implements RedisGeoCommands {
 		Assert.notNull(members, "Members must not be null!");
 		Assert.noNullElements(members, "Members must not contain null!");
 
-		return connection.inConnectionList(it -> it.geohash(key, members), value -> value.getValueOrElse(null));
+		return connection.invoke().fromMany(RedisGeoAsyncCommands::geohash, key, members)
+				.toList(it -> it.getValueOrElse(null));
 	}
 
 	/*
@@ -165,8 +164,8 @@ class LettuceGeoCommands implements RedisGeoCommands {
 		Assert.notNull(members, "Members must not be null!");
 		Assert.noNullElements(members, "Members must not contain null!");
 
-		return connection.inConnectionList(it -> it.geopos(key, members),
-				LettuceConverters.GEO_COORDINATE_TO_POINT_CONVERTER);
+		return connection.invoke().fromMany(RedisGeoAsyncCommands::geopos, key, members)
+				.toList(LettuceConverters.GEO_COORDINATE_TO_POINT_CONVERTER);
 	}
 
 	/*
@@ -182,9 +181,10 @@ class LettuceGeoCommands implements RedisGeoCommands {
 		Converter<Set<byte[]>, GeoResults<GeoLocation<byte[]>>> geoResultsConverter = LettuceConverters
 				.bytesSetToGeoResultsConverter();
 
-		return connection.inConnection(it -> it.georadius(key, within.getCenter().getX(), within.getCenter().getY(),
-				within.getRadius().getValue(), LettuceConverters.toGeoArgsUnit(within.getRadius().getMetric())),
-				geoResultsConverter);
+		return connection.invoke()
+				.from(it -> it.georadius(key, within.getCenter().getX(), within.getCenter().getY(),
+						within.getRadius().getValue(), LettuceConverters.toGeoArgsUnit(within.getRadius().getMetric())))
+				.get(geoResultsConverter);
 	}
 
 	/*
@@ -202,9 +202,10 @@ class LettuceGeoCommands implements RedisGeoCommands {
 		Converter<List<GeoWithin<byte[]>>, GeoResults<GeoLocation<byte[]>>> geoResultsConverter = LettuceConverters
 				.geoRadiusResponseToGeoResultsConverter(within.getRadius().getMetric());
 
-		return connection.inConnection(it -> it.georadius(key, within.getCenter().getX(), within.getCenter().getY(),
-				within.getRadius().getValue(), LettuceConverters.toGeoArgsUnit(within.getRadius().getMetric()), geoArgs),
-				geoResultsConverter);
+		return connection.invoke()
+				.from(it -> it.georadius(key, within.getCenter().getX(), within.getCenter().getY(),
+						within.getRadius().getValue(), LettuceConverters.toGeoArgsUnit(within.getRadius().getMetric()), geoArgs))
+				.get(geoResultsConverter);
 	}
 
 	/*
@@ -231,7 +232,8 @@ class LettuceGeoCommands implements RedisGeoCommands {
 		Converter<Set<byte[]>, GeoResults<GeoLocation<byte[]>>> converter = LettuceConverters
 				.bytesSetToGeoResultsConverter();
 
-		return connection.inConnection(it -> it.georadiusbymember(key, member, radius.getValue(), geoUnit), converter);
+		return connection.invoke().from(RedisGeoAsyncCommands::georadiusbymember, key, member, radius.getValue(), geoUnit)
+				.get(converter);
 	}
 
 	/*
@@ -252,8 +254,9 @@ class LettuceGeoCommands implements RedisGeoCommands {
 		Converter<List<GeoWithin<byte[]>>, GeoResults<GeoLocation<byte[]>>> geoResultsConverter = LettuceConverters
 				.geoRadiusResponseToGeoResultsConverter(radius.getMetric());
 
-		return connection.inConnection(it -> it.georadiusbymember(key, member, radius.getValue(), geoUnit, geoArgs),
-				geoResultsConverter);
+		return connection.invoke()
+				.from(RedisGeoAsyncCommands::georadiusbymember, key, member, radius.getValue(), geoUnit, geoArgs)
+				.get(geoResultsConverter);
 	}
 
 	/*
